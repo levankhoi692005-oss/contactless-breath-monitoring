@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+<meta charset="UTF-8">
+<title>Respiration Dashboard</title>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+
+body{
+    background:#1f1f1f;
+    color:white;
+    font-family:Arial;
+    margin:0;
+}
+
+.container{
+    width:90%;
+    max-width:1000px;
+    margin:auto;
+    padding:20px;
+}
+
+.card{
+    background:#2d2d2d;
+    border-radius:15px;
+    padding:20px;
+    margin-bottom:20px;
+    box-shadow:0 0 15px rgba(0,0,0,.4);
+}
+
+.big{
+    font-size:70px;
+    color:#00ff99;
+    margin:10px;
+}
+
+.info{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:15px;
+}
+
+.box{
+    background:#3b3b3b;
+    padding:15px;
+    border-radius:10px;
+}
+
+.box h3{
+    margin:0;
+    color:#00bfff;
+}
+
+.box p{
+    font-size:28px;
+    margin:10px;
+}
+
+canvas{
+    background:white;
+    border-radius:10px;
+}
+
+.clock{
+    font-size:26px;
+    color:#ffd54f;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="card">
+
+<h2>Respiration Dashboard</h2>
+
+<div class="clock" id="clock"></div>
+
+<div class="big" id="bpm">0</div>
+
+</div>
+
+<div class="info">
+
+<div class="box">
+<h3>Confidence</h3>
+<p id="conf">0%</p>
+</div>
+
+<div class="box">
+<h3>FPS</h3>
+<p id="fps">0</p>
+</div>
+
+<div class="box">
+<h3>Max / 1s</h3>
+<p id="max">0</p>
+</div>
+
+<div class="box">
+<h3>Min / 1s</h3>
+<p id="min">0</p>
+</div>
+
+</div>
+
+<div class="card">
+
+<h3>Respiration Rate (Last 10 Seconds)</h3>
+
+<canvas id="chart" height="120"></canvas>
+
+</div>
+
+</div>
+
+<script>
+
+let labels=[];
+let values=[];
+
+let secondData=[];
+
+const ctx=document.getElementById("chart");
+
+const chart=new Chart(ctx,{
+
+type:'line',
+
+data:{
+labels:labels,
+
+datasets:[{
+label:"Breathing Rate",
+data:values,
+borderColor:"blue",
+backgroundColor:"rgba(0,150,255,.2)",
+fill:true,
+tension:.3
+}]
+},
+
+options:{
+animation:false,
+responsive:true,
+scales:{
+y:{
+beginAtZero:true
+}
+}
+}
+
+});
+
+function updateClock(){
+
+const now=new Date();
+
+document.getElementById("clock").innerHTML=
+now.toLocaleTimeString();
+
+}
+
+setInterval(updateClock,1000);
+
+async function update(){
+
+const r=await fetch('/data');
+
+const d=await r.json();
+
+document.getElementById("bpm").innerHTML=d.bpm.toFixed(1);
+
+document.getElementById("conf").innerHTML=d.confidence.toFixed(1)+" %";
+
+document.getElementById("fps").innerHTML=d.fps.toFixed(1);
+
+
+// Lưu dữ liệu 1 giây
+
+secondData.push(d.bpm);
+
+// Max Min của 1 giây
+
+document.getElementById("max").innerHTML=
+Math.max(...secondData).toFixed(1);
+
+document.getElementById("min").innerHTML=
+Math.min(...secondData).toFixed(1);
+
+// Sau 1 giây reset
+
+setTimeout(()=>{
+
+secondData=[];
+
+},1000);
+
+
+// Đồ thị 10 giây
+
+const time=new Date().toLocaleTimeString();
+
+labels.push(time);
+
+values.push(d.bpm);
+
+if(labels.length>10){
+
+labels.shift();
+
+values.shift();
+
+}
+
+chart.update();
+
+}
+
+setInterval(update,1000);
+
+updateClock();
+
+</script>
+
+</body>
+</html>
