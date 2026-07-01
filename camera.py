@@ -1,16 +1,7 @@
 """
 camera.py
-----------
-
-Quản lý camera.
-Hỗ trợ:
-
-- Webcam
-- Camera USB
-- Video
-- DroidCam
-- Camo Studio
-
+--------------------------------
+Camera Module
 """
 
 import cv2
@@ -20,12 +11,12 @@ from config import *
 
 class Camera:
 
-    def __init__(self,
-                 source=CAMERA_INDEX):
+    def __init__(self):
 
-        self.source = source
-
-        self.cap = cv2.VideoCapture(source)
+        self.cap = cv2.VideoCapture(
+            CAMERA_INDEX,
+            cv2.CAP_DSHOW
+        )
 
         self.cap.set(
             cv2.CAP_PROP_FRAME_WIDTH,
@@ -42,11 +33,18 @@ class Camera:
             TARGET_FPS
         )
 
+        self.cap.set(
+            cv2.CAP_PROP_BUFFERSIZE,
+            1
+        )
+
         if not self.cap.isOpened():
 
             raise RuntimeError(
-                "Không mở được camera."
+                "Cannot open camera!"
             )
+
+    # =========================================
 
     def read(self):
 
@@ -57,25 +55,7 @@ class Camera:
 
         return frame
 
-    def release(self):
-
-        self.cap.release()
-
-    def get_width(self):
-
-        return int(
-            self.cap.get(
-                cv2.CAP_PROP_FRAME_WIDTH
-            )
-        )
-
-    def get_height(self):
-
-        return int(
-            self.cap.get(
-                cv2.CAP_PROP_FRAME_HEIGHT
-            )
-        )
+    # =========================================
 
     def get_fps(self):
 
@@ -87,3 +67,39 @@ class Camera:
             fps = TARGET_FPS
 
         return fps
+
+    # =========================================
+
+    def get_width(self):
+
+        return int(
+
+            self.cap.get(
+
+                cv2.CAP_PROP_FRAME_WIDTH
+
+            )
+
+        )
+
+    # =========================================
+
+    def get_height(self):
+
+        return int(
+
+            self.cap.get(
+
+                cv2.CAP_PROP_FRAME_HEIGHT
+
+            )
+
+        )
+
+    # =========================================
+
+    def release(self):
+
+        if self.cap:
+
+            self.cap.release()

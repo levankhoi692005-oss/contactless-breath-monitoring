@@ -1,12 +1,7 @@
 """
 optical_flow.py
----------------
-
-Theo dõi chuyển động vùng ngực bằng
-Lucas Kanade Optical Flow
-
-Output:
-    displacement
+--------------------------------
+Lucas-Kanade Optical Flow
 """
 
 import cv2
@@ -20,165 +15,151 @@ class OpticalFlowTracker:
     def __init__(self):
 
         self.prev_gray = None
-
         self.prev_points = None
 
-        self.displacements = []
+        self.points = None
+
+    # =======================================
 
     def reset(self):
 
         self.prev_gray = None
-
         self.prev_points = None
+        self.points = None
 
-        self.displacements.clear()
-
-    def initialize(self, roi):
-
-        gray = cv2.cvtColor(
-            roi,
-            cv2.COLOR_BGR2GRAY
-        )
-        # Nếu ROI thay đổi kích thước thì reset Optical Flow
-        if self.prev_gray is not None:
-
-            if gray.shape != self.prev_gray.shape:
-                self.initialize(roi)
-
-                return None
-
-        points = cv2.goodFeaturesToTrack(
-            gray,
-            mask=None,
-            maxCorners=MAX_CORNERS,
-            qualityLevel=QUALITY_LEVEL,
-            minDistance=MIN_DISTANCE,
-            blockSize=BLOCK_SIZE
-        )
-
-        self.prev_gray = gray
-        self.prev_points = points
+    # =======================================
 
     def update(self, roi):
 
+        if roi is None:
+            return None
+
         gray = cv2.cvtColor(
             roi,
             cv2.COLOR_BGR2GRAY
         )
 
+        # ---------- First Frame ----------
         if self.prev_gray is None:
 
-            self.initialize(roi)
+            self.prev_gray = gray
+
+            self.prev_points = cv2.goodFeaturesToTrack(
+
+                gray,
+
+                maxCorners=MAX_CORNERS,
+
+                qualityLevel=QUALITY_LEVEL,
+
+                minDistance=MIN_DISTANCE,
+
+                blockSize=BLOCK_SIZE
+
+            )
 
             return None
 
-        if self.prev_points is None:
+        # ---------- Nếu mất hết điểm ----------
+        if self.prev_points is None or len(self.prev_points) < 20:
 
-            self.initialize(roi)
+            self.prev_points = cv2.goodFeaturesToTrack(
+
+                gray,
+
+                maxCorners=MAX_CORNERS,
+
+                qualityLevel=QUALITY_LEVEL,
+
+                minDistance=MIN_DISTANCE,
+
+                blockSize=BLOCK_SIZE
+
+            )
+
+            self.prev_gray = gray
 
             return None
+
+        # ---------- Optical Flow ----------
 
         next_points, status, err = cv2.calcOpticalFlowPyrLK(
 
             self.prev_gray,
+
             gray,
+
             self.prev_points,
+
             None,
+
             **LK_PARAMS
+
         )
 
         if next_points is None:
 
-            self.initialize(roi)
+            self.reset()
 
             return None
 
-        good_old = self.prev_points[
-            status == 1
-        ]
+        good_new = next_points[status == 1]
+        good_old = self.prev_points[status == 1]
 
-        good_new = next_points[
-            status == 1
-        ]
+        if len(good_new) < 5:
 
-        if len(good_new) < 8:
-
-            self.initialize(roi)
+            self.reset()
 
             return None
 
-        motion = good_new - good_old
-
-        dx = np.mean(
-            motion[:,0]
-        )
+        # ---------- Độ dịch chuyển ----------
 
         dy = np.mean(
-            motion[:,1]
+
+            good_new[:, 1] -
+
+            good_old[:, 1]
+
         )
 
-        displacement = float(dy)
+        # lưu điểm để vẽ
 
-        self.displacements.append(
-            displacement
-        )
+        self.points = good_new
 
         self.prev_gray = gray.copy()
 
-        self.prev_points = good_new.reshape(
-            -1,
-            1,
-            2
-        )
+        self.prev_points = good_new.reshape(-1, 1, 2)
 
-        return displacement
+        return float(dy)
+
+    # =======================================
 
     def draw_points(self, roi):
 
-        if self.prev_points is None:
+        if roi is None:
+            return roi
 
+        if self.points is None:
             return roi
 
         img = roi.copy()
 
-        for p in self.prev_points:
+        for p in self.points:
 
-            x,y = p.ravel()
+            x, y = p
 
             cv2.circle(
 
                 img,
 
-                (int(x),int(y)),
+                (int(x), int(y)),
 
-                3,
+                2,
 
-                (0,255,0),
+                (0, 255, 0),
 
                 -1
 
             )
 
         return img
-
-    def get_signal(self):
-
-        return np.array(
-
-            self.displacements,
-
-            dtype=np.float32
-
-        )
-
-    def clear_signal(self):
-
-        self.displacements.clear()
-
-    def point_count(self):
-
-        if self.prev_points is None:
-
-            return 0
-
-        return len(self.prev_points)

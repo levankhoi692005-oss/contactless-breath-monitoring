@@ -1,11 +1,14 @@
 """
 mqtt_client.py
+--------------------------------
+MQTT Publisher
 """
 
 import json
 import paho.mqtt.client as mqtt
 
 from config import *
+
 
 class MQTTClient:
 
@@ -18,27 +21,39 @@ class MQTTClient:
 
         self.client = mqtt.Client()
 
-        self.client.connect(
+        try:
 
-            MQTT_BROKER,
+            self.client.connect(
 
-            MQTT_PORT,
+                MQTT_BROKER,
 
-            60
+                MQTT_PORT,
 
-        )
+                60
 
-        print("MQTT Connected")
+            )
+
+            self.client.loop_start()
+
+            print("MQTT Connected")
+
+        except Exception as e:
+
+            print("MQTT Error :", e)
+
+            self.enable = False
+
+    # =====================================
 
     def publish(
 
-            self,
+        self,
 
-            bpm,
+        bpm,
 
-            confidence,
+        confidence,
 
-            fps
+        fps
 
     ):
 
@@ -47,25 +62,35 @@ class MQTTClient:
 
         payload = {
 
-            "bpm": float(bpm),
+            "bpm": round(float(bpm), 1),
 
-            "confidence": float(confidence),
+            "confidence": round(float(confidence), 1),
 
-            "fps": float(fps)
+            "fps": round(float(fps), 1)
 
         }
 
-        self.client.publish(
+        try:
 
-            MQTT_TOPIC,
+            self.client.publish(
 
-            json.dumps(payload)
+                MQTT_TOPIC,
 
-        )
+                json.dumps(payload)
+
+            )
+
+        except Exception as e:
+
+            print(e)
+
+    # =====================================
 
     def disconnect(self):
 
         if not self.enable:
             return
+
+        self.client.loop_stop()
 
         self.client.disconnect()

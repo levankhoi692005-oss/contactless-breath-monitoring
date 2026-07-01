@@ -1,423 +1,214 @@
+
 """
-breathing_worker.py
--------------------
+breathing_worker.py (skeleton)
 
-Module chính của hệ thống đo nhịp thở.
-
-Pipeline
-
-Camera
-    ↓
-YOLO Pose
-    ↓
-Chest ROI
-    ↓
-Optical Flow
-    ↓
-Signal Buffer
-    ↓
-Signal Processing
-    ↓
-Peak Detection
-    ↓
-Respiration Rate
+Phiên bản khung cho chế độ đo 60 giây.
+Hoàn thiện bằng cách ghép với các module:
+camera.py, pose_detector.py, roi_tracker.py,
+optical_flow.py, signal_processing.py, peak_detector.py
 """
 
 import cv2
 import time
+import json
 import numpy as np
 from collections import deque
-from mqtt_client import MQTTClient
+
 from camera import Camera
 from pose_detector import PoseDetector
 from roi_tracker import ROITracker
 from optical_flow import OpticalFlowTracker
 from signal_processing import SignalProcessor
 from peak_detector import PeakDetector
-
-import json
+from mqtt_client import MQTTClient
 from config import *
 
+from graph import GraphDrawer
 
 class BreathingWorker:
 
     def __init__(self):
 
-        print("=" * 50)
-        print("Initializing Breathing Worker")
-        print("=" * 50)
-
-        # Camera
         self.camera = Camera()
-        self.mqtt = MQTTClient()
-        self.fps = self.camera.get_fps()
+        self.pose = PoseDetector()
+        self.roi_tracker = ROITracker()
+        self.flow = OpticalFlowTracker()
 
+        self.graph = GraphDrawer()
+        self.filtered_signal = None
+        self.signal_peaks = []
+
+
+
+        self.fps = self.camera.get_fps()
         if self.fps <= 1:
             self.fps = TARGET_FPS
 
-        print("FPS :", self.fps)
-
-        # Pose
-        self.pose = PoseDetector()
-
-        # ROI
-        self.roi_tracker = ROITracker()
-
-        # Optical Flow
-        self.flow = OpticalFlowTracker()
-
-        # Signal Processing
         self.processor = SignalProcessor(self.fps)
-
-        # Peak Detector
         self.detector = PeakDetector(self.fps)
+        self.mqtt = MQTTClient()
 
-        # Buffer tín hiệu
-        self.signal_buffer = deque(
-            maxlen=int(self.fps * WINDOW_SECONDS)
-        )
+        self.graph = GraphDrawer()
 
-        # Buffer thời gian
-        self.time_buffer = deque(
-            maxlen=int(self.fps * WINDOW_SECONDS)
-        )
+        self.filtered_signal = None
 
-        # BPM hiện tại
+        self.signal_peaks = []
+
+
+        self.signal_buffer = deque(maxlen=int(self.fps * WINDOW_SECONDS))
+
         self.current_bpm = 0
-
         self.current_confidence = 0
 
-        # FPS
-        self.prev_time = time.time()
+        self.is_measuring = False
+        self.measure_duration = 60
+        self.measure_start = 0
+        self.remaining_time = 60
 
-        self.display_fps = 0
 
-        # Trạng thái
-        self.person_detected = False
 
-        self.frame_count = 0
+    def start_measurement(self):
+        self.signal_buffer.clear()
+        self.flow.reset()
+        self.is_measuring = True
+        self.measure_start = time.time()
+        self.remaining_time = self.measure_duration
+        print("Measurement started.")
 
-        print("Initialization Complete.")
-
-    # --------------------------------------------------
-
-    def update_fps(self):
-
-        now = time.time()
-
-        dt = now - self.prev_time
-
-        self.prev_time = now
-
-        if dt > 0:
-            self.display_fps = 1.0 / dt
-
-    # --------------------------------------------------
-
-    def append_signal(self, value):
-
-        self.signal_buffer.append(value)
-
-        self.time_buffer.append(time.time())
-
-    # --------------------------------------------------
-
-    def enough_signal(self):
-
-        return len(self.signal_buffer) >= self.fps * 15
-
-    # --------------------------------------------------
-
-    def estimate_breathing(self):
+    def finish_measurement(self):
+        self.is_measuring = False
 
         signal = np.array(self.signal_buffer)
-
         signal = self.processor.process(signal)
 
-        result = self.detector.estimate(
+        self.filtered_signal = signal.copy()
 
-            signal,
+        result = self.detector.estimate(signal, self.processor)
+        if result is not None:
+            self.signal_peaks = result["peaks"]
 
-            self.processor
+        if result:
+            self.current_bpm = result["bpm"]
+            self.current_confidence = result["confidence"]
 
-        )
+            with open("output/latest.json", "w") as f:
+                json.dump({
+                    "bpm": self.current_bpm,
+                    "confidence": self.current_confidence,
+                    "fps": self.fps
+                }, f)
 
-        if result is None:
-            return
-
-        self.current_bpm = result["bpm"]
-
-        self.current_confidence = result["confidence"]
-
-        # ===== Publish MQTT =====
-        self.mqtt.publish(
-            self.current_bpm,
-            self.current_confidence,
-            self.display_fps
-        )
-
-        with open("output/latest.json", "w") as f:
-            json.dump({
-
-                "bpm": self.current_bpm,
-
-                "confidence": self.current_confidence,
-
-                "fps": self.display_fps
-
-            }, f)
-
-
-    # --------------------------------------------------
-
-    def draw_information(self, frame):
-
-        cv2.putText(
-            frame,
-            f"BPM : {self.current_bpm:.1f}",
-            (20,40),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (0,255,0),
-            2
-        )
-
-        cv2.putText(
-            frame,
-            f"Confidence : {self.current_confidence:.1f}%",
-            (20,80),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255,255,0),
-            2
-        )
-
-        cv2.putText(
-            frame,
-            f"FPS : {self.display_fps:.1f}",
-            (20,120),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (0,255,255),
-            2
-        )
-
-        cv2.putText(
-            frame,
-            f"Samples : {len(self.signal_buffer)}",
-            (20,160),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            (255,0,255),
-            2
-        )
-
-        return frame
-
-    # --------------------------------------------------
-
-    def process_frame(self, frame):
-
-        detection = self.pose.detect(frame)
-
-        if detection is None:
-
-            self.person_detected = False
-
-            self.flow.reset()
-
-            return frame
-
-        self.person_detected = True
-
-        chest_box = self.pose.get_chest_box(detection)
-
-        roi, roi_box = self.roi_tracker.get_roi(
-            frame,
-            chest_box
-        )
-
-        frame = self.pose.draw(frame, detection)
-        frame = self.roi_tracker.draw(frame, roi_box)
-
-        if roi is None:
-            return frame
-
-        displacement = self.flow.update(roi)
-
-        if displacement is not None:
-            self.append_signal(displacement)
-
-        roi = self.flow.draw_points(roi)
-
-        cv2.imshow("Chest ROI", roi)
-
-        return frame
-
-
-    # --------------------------------------------------
-
-    def update_estimation(self):
-
-        """
-        Chỉ bắt đầu tính BPM khi đã có đủ tín hiệu.
-        """
-
-        if not self.enough_signal():
-            return
-
-        try:
-
-            self.estimate_breathing()
-
-        except Exception as e:
-
-            print("Estimate Error :", e)
-
-    # --------------------------------------------------
-
-    def save_csv(self):
-
-        """
-        Lưu tín hiệu để phân tích sau.
-        """
-
-        if len(self.signal_buffer) == 0:
-            return
-
-        try:
-
-            signal = np.array(self.signal_buffer)
-
-            np.savetxt(
-                CSV_FILE,
-                signal,
-                delimiter=","
+            self.mqtt.publish(
+                self.current_bpm,
+                self.current_confidence,
+                self.fps
             )
 
-        except Exception as e:
+            print("BPM:", self.current_bpm)
 
-            print(e)
+    def update_measurement(self):
 
-    # --------------------------------------------------
+        if not self.is_measuring:
+            return
 
-    def reset_tracking(self):
-
-        """
-        Reset khi mất người.
-        """
-
-        self.flow.reset()
-
-        self.signal_buffer.clear()
-
-        self.time_buffer.clear()
-
-        self.current_bpm = 0
-
-        self.current_confidence = 0
-
-    # --------------------------------------------------
-
-    def draw_status(self, frame):
-
-        status = "Detected"
-
-        color = (0,255,0)
-
-        if not self.person_detected:
-
-            status = "No Person"
-
-            color = (0,0,255)
-
-        cv2.putText(
-
-            frame,
-
-            status,
-
-            (20,200),
-
-            cv2.FONT_HERSHEY_SIMPLEX,
-
-            0.8,
-
-            color,
-
-            2
-
+        elapsed = time.time() - self.measure_start
+        self.remaining_time = max(
+            0,
+            int(self.measure_duration - elapsed)
         )
 
-        return frame
-
-    # --------------------------------------------------
+        if elapsed >= self.measure_duration:
+            self.finish_measurement()
 
     def run(self):
-
-        print("Start Monitoring...")
-
-        last_estimate = time.time()
-
-        estimate_interval = 5
 
         while True:
 
             frame = self.camera.read()
 
-            if frame is None:
+            detection = self.pose.detect(frame)
 
+            if detection is not None:
+
+                chest_box = self.pose.get_chest_box(detection)
+
+                roi, roi_box = self.roi_tracker.get_roi(
+                    frame,
+                    chest_box
+                )
+
+                frame = self.pose.draw(frame, detection)
+
+                frame = self.roi_tracker.draw(frame, roi_box)
+
+                if roi is not None:
+
+                    displacement = self.flow.update(roi)
+
+                    if self.is_measuring and displacement is not None:
+                        self.signal_buffer.append(displacement)
+
+                    cv2.imshow("Chest ROI", roi)
+
+            if frame is None:
                 break
 
-            self.frame_count += 1
+            # TODO:
+            # detection = self.pose.detect(frame)
+            # roi = ...
+            # displacement = ...
+            # if self.is_measuring:
+            #     self.signal_buffer.append(displacement)
 
-            self.update_fps()
+            self.update_measurement()
 
-            frame = self.process_frame(frame)
-
-            now = time.time()
-
-            if now - last_estimate >= estimate_interval:
-
-                self.update_estimation()
-
-                self.save_csv()
-
-                last_estimate = now
-
-            frame = self.draw_information(frame)
-
-            frame = self.draw_status(frame)
-
-            cv2.imshow(
-
-                "Breathing AI",
-
-                frame
-
+            cv2.putText(
+                frame,
+                f"BPM: {self.current_bpm}",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0,255,0),
+                2
             )
 
-            key = cv2.waitKey(1)
+            if self.is_measuring:
+                txt = f"Measuring: {self.remaining_time}s"
+            else:
+                txt = "Press S to Start"
 
-            if key == 27:
+            cv2.putText(
+                frame,
+                txt,
+                (20,80),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0,255,255),
+                2
+            )
 
+            frame = self.graph.draw(
+
+                frame,
+
+                self.filtered_signal,
+
+                self.signal_peaks
+
+            )
+            cv2.imshow("Breathing AI", frame)
+
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == ord("s"):
+                self.start_measurement()
+
+            elif key == 27:
                 break
 
-            elif key == ord("r"):
-
-                print("Reset")
-
-                self.reset_tracking()
-
         self.camera.release()
-
         cv2.destroyAllWindows()
 
 
-# ======================================================
-
 if __name__ == "__main__":
-
-    worker = BreathingWorker()
-
-    worker.run()
+    BreathingWorker().run()

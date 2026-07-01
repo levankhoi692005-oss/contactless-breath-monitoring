@@ -1,15 +1,15 @@
+
 """
 roi_tracker.py
-=========================
-Theo dõi và làm mượt ROI vùng ngực.
+--------------------------------
+Chest ROI Tracker
 """
 
 import cv2
 import numpy as np
 
-from config import ROI_PADDING
-ROI_WIDTH = 220
-ROI_HEIGHT = 160
+from config import *
+
 
 class ROITracker:
 
@@ -19,15 +19,29 @@ class ROITracker:
 
         self.last_box = None
 
-    def _smooth(self, box):
+    # =====================================
+
+    def smooth(self, box):
 
         if self.last_box is None:
 
-            self.last_box = np.array(box, dtype=np.float32)
+            self.last_box = np.array(
+
+                box,
+
+                dtype=np.float32
+
+            )
 
             return box
 
-        current = np.array(box, dtype=np.float32)
+        current = np.array(
+
+            box,
+
+            dtype=np.float32
+
+        )
 
         self.last_box = (
 
@@ -38,6 +52,8 @@ class ROITracker:
         )
 
         return self.last_box.astype(int)
+
+    # =====================================
 
     def get_roi(self, frame, chest_box):
 
@@ -55,8 +71,10 @@ class ROITracker:
         x2 += ROI_PADDING
         y2 += ROI_PADDING
 
-        x1, y1, x2, y2 = self._smooth(
+        x1, y1, x2, y2 = self.smooth(
+
             (x1, y1, x2, y2)
+
         )
 
         x1 = max(0, x1)
@@ -65,19 +83,22 @@ class ROITracker:
         x2 = min(w - 1, x2)
         y2 = min(h - 1, y2)
 
-        if x2 <= x1:
-            return None, None
+        if x2 <= x1 or y2 <= y1:
 
-        if y2 <= y1:
             return None, None
 
         roi = frame[
+
             y1:y2,
+
             x1:x2
+
         ]
 
         if roi.size == 0:
+
             return None, None
+
         roi = cv2.resize(
 
             roi,
@@ -94,9 +115,12 @@ class ROITracker:
 
         return roi, (x1, y1, x2, y2)
 
+    # =====================================
+
     def draw(self, frame, roi_box):
 
         if roi_box is None:
+
             return frame
 
         x1, y1, x2, y2 = roi_box
@@ -109,7 +133,7 @@ class ROITracker:
 
             (x2, y2),
 
-            (0, 255, 255),
+            YELLOW,
 
             2
 
@@ -119,7 +143,7 @@ class ROITracker:
 
             frame,
 
-            "ROI",
+            "Chest ROI",
 
             (x1, y1 - 10),
 
@@ -127,13 +151,15 @@ class ROITracker:
 
             0.6,
 
-            (0, 255, 255),
+            YELLOW,
 
             2
 
         )
 
         return frame
+
+    # =====================================
 
     def reset(self):
 

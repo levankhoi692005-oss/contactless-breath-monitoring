@@ -1,11 +1,10 @@
 """
 peak_detector.py
-=========================================
-Peak Detection for Respiration
+--------------------------------
+Respiration Peak Detector
 """
 
 import numpy as np
-
 from scipy.signal import find_peaks
 
 from config import *
@@ -17,192 +16,121 @@ class PeakDetector:
 
         self.fps = fps
 
-    # ==================================================
+    # =====================================
 
-    def detect_peaks(self, signal):
+    def get_peaks(self, signal):
 
-        if len(signal) < self.fps * MIN_SIGNAL_SECONDS:
-
-            return None
-
-        prominence = max(
-            np.std(signal) * 0.4,
-            0.08
-        )
-
-        distance = int(
-            self.fps * 1.2
-        )
-
-        peaks, properties = find_peaks(
+        peaks, _ = find_peaks(
 
             signal,
 
-            prominence=prominence,
+            prominence=max(
 
-            distance=distance
+                np.std(signal) * 0.40,
+
+                0.08
+
+            ),
+
+            distance=int(self.fps * 1.2)
 
         )
 
         return peaks
 
-    # ==================================================
+    # =====================================
 
     def bpm_from_peaks(self, signal):
 
-        peaks = self.detect_peaks(signal)
-
-        if peaks is None:
-
-            return None
+        peaks = self.get_peaks(signal)
 
         if len(peaks) < 2:
 
-            return None
+            return 0
 
         duration = len(signal) / self.fps
 
-        bpm = (
-
-            len(peaks) * 60
-
-        ) / duration
+        bpm = len(peaks) * 60 / duration
 
         return bpm
 
-    # ==================================================
+    # =====================================
 
-    def bpm_from_fft(
+    def bpm_from_fft(self, processor, signal):
 
-            self,
+        freq, fft = processor.fft(signal)
 
-            processor,
+        mask = (
 
-            signal
+            (freq >= LOWCUT)
 
-    ):
+            &
 
-        return processor.estimate_bpm_fft(
-
-            signal
+            (freq <= HIGHCUT)
 
         )
 
-    # ==================================================
-
-    def confidence(
-
-            self,
-
-            peak_bpm,
-
-            fft_bpm
-
-    ):
-
-        if peak_bpm is None:
+        if np.sum(mask) == 0:
 
             return 0
 
-        if fft_bpm is None:
+        freq = freq[mask]
+
+        fft = fft[mask]
+
+        idx = np.argmax(fft)
+
+        return freq[idx] * 60
+
+    # =====================================
+
+    def confidence(self, peak_bpm, fft_bpm):
+
+        if peak_bpm == 0 or fft_bpm == 0:
 
             return 0
 
         diff = abs(
 
-            peak_bpm -
-
-            fft_bpm
+            peak_bpm - fft_bpm
 
         )
 
-        score = max(
+        conf = max(
 
             0,
 
-            100 -
-
-            diff * 5
+            100 - diff * 8
 
         )
 
-        return score
+        return conf
 
-    # ==================================================
+    # =====================================
 
-    def validate(self, bpm):
+    def estimate(self, signal, processor):
 
-        if bpm is None:
-
-            return None
-
-        if bpm < MIN_BPM:
+        if len(signal) < self.fps * 15:
 
             return None
 
-        if bpm > MAX_BPM:
+        peak_bpm = self.bpm_from_peaks(signal)
 
-            return None
+        fft_bpm = self.bpm_from_fft(
 
-        return bpm
-
-    # ==================================================
-
-    def estimate(
-
-            self,
-
-            signal,
-
-            processor=None
-
-    ):
-
-        peak_bpm = self.bpm_from_peaks(
+            processor,
 
             signal
 
         )
 
-        peak_bpm = self.validate(
-
-            peak_bpm
-
-        )
-
-        fft_bpm = None
-
-        if processor is not None:
-
-            fft_bpm = self.bpm_from_fft(
-
-                processor,
-
-                signal
-
-            )
-
-            fft_bpm = self.validate(
-
-                fft_bpm
-
-            )
-
-        if peak_bpm is None:
-
-            if fft_bpm is None:
-
-                return None
+        if peak_bpm == 0:
 
             bpm = fft_bpm
 
-            score = 70
-
-        elif fft_bpm is None:
+        elif fft_bpm == 0:
 
             bpm = peak_bpm
-
-            score = 70
 
         else:
 
@@ -214,62 +142,30 @@ class PeakDetector:
 
             ) / 2
 
-            score = self.confidence(
+        bpm = np.clip(
 
-                peak_bpm,
+            bpm,
 
-                fft_bpm
+            MIN_BPM,
 
-            )
+            MAX_BPM
+
+        )
+
+        conf = self.confidence(
+
+            peak_bpm,
+
+            fft_bpm
+
+        )
 
         return {
 
-            "bpm": round(
+            "bpm": round(float(bpm), 1),
 
-                float(bpm),
+            "confidence": round(float(conf), 1),
 
-                1
-
-            ),
-
-            "peak_bpm": round(
-
-                float(
-
-                    peak_bpm
-
-                    if peak_bpm
-
-                    else 0
-
-                ),
-
-                1
-
-            ),
-
-            "fft_bpm": round(
-
-                float(
-
-                    fft_bpm
-
-                    if fft_bpm
-
-                    else 0
-
-                ),
-
-                1
-
-            ),
-
-            "confidence": round(
-
-                float(score),
-
-                1
-
-            )
+            "peaks": self.get_peaks(signal)
 
         }

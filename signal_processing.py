@@ -1,20 +1,13 @@
 """
 signal_processing.py
-=========================================
-Signal Processing for Respiration Detection
+--------------------------------
+Respiration Signal Processing
 """
 
 import numpy as np
-
 from scipy.signal import butter
 from scipy.signal import filtfilt
 from scipy.signal import detrend
-from scipy.signal import savgol_filter
-
-from scipy.fft import rfft
-from scipy.fft import rfftfreq
-
-from config import *
 
 
 class SignalProcessor:
@@ -23,86 +16,13 @@ class SignalProcessor:
 
         self.fps = fps
 
-    # =====================================================
-
-    def remove_trend(self, signal):
-
-        if len(signal) < 5:
-
-            return signal
-
-        return detrend(signal)
-
-    # =====================================================
-
-    def remove_outlier(self, signal):
-
-        if len(signal) < 10:
-
-            return signal
-
-        median = np.median(signal)
-
-        mad = np.median(
-
-            np.abs(
-
-                signal - median
-
-            )
-
-        )
-
-        if mad < 1e-6:
-
-            return signal
-
-        score = np.abs(
-
-            signal - median
-
-        ) / mad
-
-        cleaned = signal.copy()
-
-        cleaned[score > 3] = median
-
-        return cleaned
-
-    # =====================================================
-
-    def normalize(self, signal):
-
-        if len(signal) == 0:
-
-            return signal
-
-        mean = np.mean(signal)
-
-        std = np.std(signal)
-
-        if std < 1e-8:
-
-            return signal
-
-        return (
-
-            signal - mean
-
-        ) / std
-
-    # =====================================================
+    # =====================================
 
     def butter_bandpass(self, signal):
 
-        if len(signal) < self.fps * 2:
-
-            return signal
-
-        nyquist = self.fps * 0.5
+        nyquist = 0.5 * self.fps
 
         low = LOWCUT / nyquist
-
         high = HIGHCUT / nyquist
 
         b, a = butter(
@@ -115,53 +35,26 @@ class SignalProcessor:
 
         )
 
-        return filtfilt(
+        return filtfilt(b, a, signal)
 
-            b,
+    # =====================================
 
-            a,
+    def normalize(self, signal):
 
-            signal
+        signal = signal - np.mean(signal)
 
-        )
+        std = np.std(signal)
 
-    # =====================================================
-
-    def smooth(self, signal):
-
-        if len(signal) < 21:
-
+        if std < 1e-6:
             return signal
 
-        return savgol_filter(
+        return signal / std
 
-            signal,
+    # =====================================
 
-            21,
+    def moving_average(self, signal, k=5):
 
-            3
-
-        )
-
-    # =====================================================
-
-    def moving_average(
-
-            self,
-
-            signal,
-
-            window=5
-
-    ):
-
-        if len(signal) < window:
-
-            return signal
-
-        kernel = np.ones(window)
-
-        kernel /= window
+        kernel = np.ones(k) / k
 
         return np.convolve(
 
@@ -173,75 +66,32 @@ class SignalProcessor:
 
         )
 
-    # =====================================================
+    # =====================================
 
-    def fft(self, signal):
+    def remove_outlier(self, signal):
 
-        if len(signal) < self.fps * 5:
+        median = np.median(signal)
 
-            return None, None
+        mad = np.median(
 
-        freq = rfftfreq(
-
-            len(signal),
-
-            1 / self.fps
+            np.abs(signal - median)
 
         )
 
-        amp = np.abs(
+        if mad < 1e-6:
+            return signal
 
-            rfft(signal)
+        z = np.abs(
 
-        )
+            signal - median
 
-        return freq, amp
+        ) / (1.4826 * mad)
 
-    # =====================================================
+        signal[z > 3] = median
 
-    def dominant_frequency(self, signal):
+        return signal
 
-        freq, amp = self.fft(signal)
-
-        if freq is None:
-
-            return None
-
-        mask = (
-
-            (freq >= LOWCUT)
-
-            &
-
-            (freq <= HIGHCUT)
-
-        )
-
-        if np.sum(mask) == 0:
-
-            return None
-
-        idx = np.argmax(
-
-            amp[mask]
-
-        )
-
-        return freq[mask][idx]
-
-    # =====================================================
-
-    def estimate_bpm_fft(self, signal):
-
-        f = self.dominant_frequency(signal)
-
-        if f is None:
-
-            return None
-
-        return f * 60
-
-    # =====================================================
+    # =====================================
 
     def process(self, signal):
 
@@ -253,40 +103,36 @@ class SignalProcessor:
 
         )
 
-        signal = self.remove_trend(
+        signal = detrend(signal)
 
-            signal
+        signal = self.remove_outlier(signal)
 
-        )
+        signal = self.normalize(signal)
 
-        signal = self.remove_outlier(
+        signal = self.butter_bandpass(signal)
 
-            signal
-
-        )
-
-        signal = self.normalize(
-
-            signal
-
-        )
-
-        signal = self.butter_bandpass(
-
-            signal
-
-        )
-
-        signal = self.smooth(
-
-            signal
-
-        )
-
-        signal = self.moving_average(
-
-            signal
-
-        )
+        signal = self.moving_average(signal, 5)
 
         return signal
+
+    # =====================================
+
+    def fft(self, signal):
+
+        n = len(signal)
+
+        fft = np.abs(
+
+            np.fft.rfft(signal)
+
+        )
+
+        freq = np.fft.rfftfreq(
+
+            n,
+
+            1 / self.fps
+
+        )
+
+        return freq, fft
